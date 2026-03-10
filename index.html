@@ -68,7 +68,7 @@
                 setIsDbLoading(true);
                 try {
                     const response = await fetch(`${SPREADSHEET_CSV_URL}&t=${Date.now()}`);
-                    if (!response.ok) throw new Error("讀取試算表失敗");
+                    if (!response.ok) throw new Error("讀取記錄失敗");
                     const csvText = await response.text();
                     const rows = csvText.split(/\r?\n/).slice(1);
                     const parsedData = rows.map(row => {
@@ -111,7 +111,7 @@
                     eDate.setHours(0, 0, 0, 0);
                     // 如果現在時間大於結束日期
                     if (!isNaN(eDate.getTime()) && nowTs > eDate.getTime()) {
-                        return { valid: false, reason: '許可已過期' };
+                        return { valid: false, reason: '泊車許可已過期' };
                     }
                 }
                 
@@ -256,3 +256,4 @@
     </script>
 </body>
 </html>
+
