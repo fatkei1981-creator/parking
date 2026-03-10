@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>粵語車牌語音核對系統 (日期審核)</title>
+    <title>粵語車牌語音核對系統 (日期精確版)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { -webkit-tap-highlight-color: transparent; font-family: sans-serif; }
+        body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         .animate-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .icon-box { min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+        .icon-box { min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
     </style>
 </head>
 <body class="bg-slate-50">
@@ -24,7 +24,7 @@
 
         const SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQV-najIami6USTFBzxSpJ7jrxwRGoD4SdNimU4BgHjobS9GwYA-JlNXmVabaWVzBmRezYWrUDqYi4e/pub?output=csv";
 
-        // 強化的圖標組件，解決一開始顯示不到的問題
+        // 強化的圖標組件
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
             useEffect(() => {
@@ -35,7 +35,6 @@
                     }
                 };
                 initIcon();
-                // 額外延遲執行一次以防資源加載延遲
                 const timer = setTimeout(initIcon, 300);
                 return () => clearTimeout(timer);
             }, [name, size, className]);
@@ -92,17 +91,30 @@
 
             const checkDateValidity = (start, end) => {
                 if (!start && !end) return { valid: true };
+                
+                // 獲取當前日期並抹除時間（設為 00:00:00）
                 const now = new Date();
                 now.setHours(0, 0, 0, 0);
+                const nowTs = now.getTime();
                 
                 if (start) {
                     const sDate = new Date(start);
-                    if (!isNaN(sDate) && now < sDate) return { valid: false, reason: '未到生效期' };
+                    sDate.setHours(0, 0, 0, 0);
+                    // 如果現在時間小於開始日期
+                    if (!isNaN(sDate.getTime()) && nowTs < sDate.getTime()) {
+                        return { valid: false, reason: '未到生效期' };
+                    }
                 }
+                
                 if (end) {
                     const eDate = new Date(end);
-                    if (!isNaN(eDate) && now > eDate) return { valid: false, reason: '許可已過期' };
+                    eDate.setHours(0, 0, 0, 0);
+                    // 如果現在時間大於結束日期
+                    if (!isNaN(eDate.getTime()) && nowTs > eDate.getTime()) {
+                        return { valid: false, reason: '許可已過期' };
+                    }
                 }
+                
                 return { valid: true };
             };
 
@@ -149,54 +161,70 @@
             const handleEnd = (e) => {
                 if (e) e.preventDefault();
                 if (!isListening) return;
-                setTimeout(() => { recognitionRef.current.stop(); setIsListening(false); if (lastResultRef.current) performCheck(lastResultRef.current); }, 400);
+                setTimeout(() => { 
+                    if (recognitionRef.current) recognitionRef.current.stop(); 
+                    setIsListening(false); 
+                    if (lastResultRef.current) performCheck(lastResultRef.current); 
+                }, 400);
             };
 
             return (
                 <div className="min-h-screen pb-20">
-                    <nav className="bg-emerald-700 text-white p-4 shadow-lg sticky top-0 z-50">
+                    <nav className="bg-emerald-800 text-white p-4 shadow-lg sticky top-0 z-50">
                         <div className="max-w-md mx-auto flex justify-between items-center">
                             <div className="flex items-center gap-2">
                                 <Icon name="Volume2" />
-                                <h1 className="text-xl font-bold">車牌語音核對</h1>
+                                <h1 className="text-xl font-bold tracking-tight">車牌語音核對</h1>
                             </div>
-                            <button onClick={fetchSheetData} className="p-2 active:scale-90"><Icon name="RefreshCw" className={isDbLoading ? "animate-spin" : ""} /></button>
+                            <button onClick={fetchSheetData} className="p-2 active:scale-90 bg-white/10 rounded-full">
+                                <Icon name="RefreshCw" className={isDbLoading ? "animate-spin" : ""} />
+                            </button>
                         </div>
                     </nav>
 
                     <main className="max-w-md mx-auto p-4 space-y-6">
-                        {error && <div className="p-4 bg-rose-50 text-rose-600 rounded-2xl text-xs font-bold border border-rose-100">{error}</div>}
+                        {error && <div className="p-4 bg-rose-50 text-rose-600 rounded-2xl text-xs font-bold border border-rose-100 flex items-center gap-2">
+                            <Icon name="AlertCircle" size={14} /> {error}
+                        </div>}
 
-                        <div className="bg-white rounded-[2.5rem] shadow-xl p-8 flex flex-col items-center text-center">
+                        <div className="bg-white rounded-[2.5rem] shadow-xl p-8 flex flex-col items-center text-center border border-slate-100">
                             <div className="mb-6 relative">
                                 {isListening && <div className="absolute -inset-6 border-4 border-emerald-500/20 rounded-full animate-ping"></div>}
                                 <button onMouseDown={handleStart} onMouseUp={handleEnd} onTouchStart={handleStart} onTouchEnd={handleEnd}
-                                    className={`w-36 h-36 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-50 text-slate-300'}`}
+                                    className={`w-36 h-36 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 touch-none ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-50 text-slate-300'}`}
                                 >
                                     <Icon name={isListening ? "Mic" : "MicOff"} size={64} />
                                 </button>
                             </div>
                             <h2 className={`text-2xl font-black ${isListening ? 'text-emerald-600' : 'text-slate-600'}`}>{isListening ? "聆聽中..." : "長按說話"}</h2>
-                            {transcript && <div className="mt-6 p-4 bg-slate-50 rounded-2xl w-full border-2 border-slate-100 font-mono text-3xl font-black">{recognizedPlate || '...'}</div>}
+                            <p className="text-xs text-slate-400 mt-1">支持廣東話識別</p>
+                            
+                            {transcript && (
+                                <div className="mt-8 p-6 bg-slate-50 rounded-3xl w-full border-2 border-slate-100 font-mono text-4xl font-black text-slate-800">
+                                    {recognizedPlate || '...'}
+                                </div>
+                            )}
                         </div>
 
                         {matchData && !isListening && (
                             <div className={`p-6 rounded-[2.5rem] shadow-2xl text-white animate-in ${matchData.valid ? 'bg-emerald-600' : 'bg-amber-500'}`}>
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <p className="text-xs font-bold opacity-80 uppercase">{matchData.valid ? '已授權名單' : '警告：效期問題'}</p>
+                                        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">{matchData.valid ? '已授權名單' : '狀態：不適用'}</p>
                                         <h2 className="text-5xl font-mono font-black">{matchData.number}</h2>
                                     </div>
                                     <div className="bg-white/20 p-4 rounded-3xl"><Icon name={matchData.valid ? "ShieldCheck" : "Clock"} size={40} /></div>
                                 </div>
-                                <div className="mt-4 p-4 bg-white/10 rounded-2xl border border-white/10 space-y-2">
-                                    <p className="text-sm font-bold">備註：{matchData.note || '無'}</p>
-                                    <div className="flex gap-4 text-[10px] opacity-80 font-mono">
-                                        <span>起：{matchData.startDate || '--'}</span>
-                                        <span>訖：{matchData.endDate || '--'}</span>
+                                <div className="mt-4 p-5 bg-white/10 rounded-2xl border border-white/10 space-y-3">
+                                    <div className="flex items-center gap-2 text-sm font-bold">
+                                        <Icon name="FileText" size={16} /> 備註：{matchData.note || '無'}
+                                    </div>
+                                    <div className="flex gap-4 text-[11px] opacity-90 font-mono bg-black/10 p-2 rounded-lg">
+                                        <span>生效：{matchData.startDate || '不限'}</span>
+                                        <span>過期：{matchData.endDate || '不限'}</span>
                                     </div>
                                 </div>
-                                <div className="mt-4 py-3 bg-white text-emerald-700 rounded-xl font-black text-center text-xl shadow-lg">
+                                <div className="mt-6 py-4 bg-white text-emerald-700 rounded-2xl font-black text-center text-2xl shadow-lg border-b-4 border-emerald-100">
                                     {matchData.valid ? "✅ 准予進入" : `❌ ${matchData.reason}`}
                                 </div>
                             </div>
@@ -205,14 +233,19 @@
                         {matchData === null && recognizedPlate && !isListening && (
                             <div className="p-6 rounded-[2.5rem] shadow-2xl bg-rose-600 text-white animate-in">
                                 <div className="flex justify-between items-center">
-                                    <h2 className="text-5xl font-mono font-black">{recognizedPlate}</h2>
+                                    <div>
+                                        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">系統核對</p>
+                                        <h2 className="text-5xl font-mono font-black">{recognizedPlate}</h2>
+                                    </div>
                                     <Icon name="ShieldAlert" size={40} />
                                 </div>
-                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-center text-xl uppercase">⚠️ 未在名單內</div>
+                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-center text-2xl uppercase border-b-4 border-rose-100">
+                                    ⚠️ 未在名單內
+                                </div>
                             </div>
                         )}
                     </main>
-                    <footer className="fixed bottom-0 left-0 right-0 p-4 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                    <footer className="fixed bottom-0 left-0 right-0 p-4 bg-slate-50/80 backdrop-blur-md text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                         Database: {plates.length} Records Loaded
                     </footer>
                 </div>
