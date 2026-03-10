@@ -3,21 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>粵語車牌語音核對系統</title>
-    <!-- 載入 React 與 Babel -->
+    <title>粵語車牌語音核對系統 (日期審核)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 載入 Lucide 圖標庫 -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        body { -webkit-tap-highlight-color: transparent; font-family: sans-serif; }
         .animate-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* 確保圖標容器有基本大小 */
-        .icon-container { min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+        .icon-box { min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; }
     </style>
 </head>
 <body class="bg-slate-50">
@@ -26,44 +22,24 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- 配置區域 ---
-        // 請確保此連結已發佈到網路並選擇 CSV
         const SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQV-najIami6USTFBzxSpJ7jrxwRGoD4SdNimU4BgHjobS9GwYA-JlNXmVabaWVzBmRezYWrUDqYi4e/pub?output=csv";
 
-        // 更健壯的圖標組件
+        // 強化的圖標組件，解決一開始顯示不到的問題
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
-            
             useEffect(() => {
-                const renderIcon = () => {
+                const initIcon = () => {
                     if (window.lucide && iconRef.current) {
-                        iconRef.current.innerHTML = '';
-                        const i = document.createElement('i');
-                        i.setAttribute('data-lucide', name.toLowerCase().replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase());
-                        if (className) i.className = className;
-                        iconRef.current.appendChild(i);
-                        window.lucide.createIcons({
-                            attrs: { strokeWidth: 2, width: size, height: size },
-                            nameAttr: 'data-lucide'
-                        });
+                        iconRef.current.innerHTML = `<i data-lucide="${name.toLowerCase()}" class="${className}" style="width:${size}px;height:${size}px"></i>`;
+                        window.lucide.createIcons();
                     }
                 };
-
-                // 如果 lucide 還沒載入完畢，等待一下
-                if (!window.lucide) {
-                    const timer = setInterval(() => {
-                        if (window.lucide) {
-                            renderIcon();
-                            clearInterval(timer);
-                        }
-                    }, 100);
-                    return () => clearInterval(timer);
-                } else {
-                    renderIcon();
-                }
+                initIcon();
+                // 額外延遲執行一次以防資源加載延遲
+                const timer = setTimeout(initIcon, 300);
+                return () => clearTimeout(timer);
             }, [name, size, className]);
-
-            return <span ref={iconRef} className="icon-container"></span>;
+            return <span ref={iconRef} className="icon-box"></span>;
         };
 
         function App() {
@@ -74,27 +50,14 @@
             const [matchData, setMatchData] = useState(null);
             const [error, setError] = useState('');
             const [isDbLoading, setIsDbLoading] = useState(false);
-            const [isHttps, setIsHttps] = useState(true);
 
             const recognitionRef = useRef(null);
             const platesRef = useRef([]);
             const lastResultRef = useRef('');
 
-            // 檢查是否為 HTTPS
-            useEffect(() => {
-                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-                    setIsHttps(false);
-                    setError("安全性警告：語音功能要求網頁必須在 HTTPS 環境下執行。目前為不安全連線，功能將受限。");
-                }
-            }, []);
-
             const strictNormalize = (text) => {
                 if (!text) return '';
-                return text.toString()
-                    .replace(/\s+/g, '')
-                    .replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '')
-                    .toUpperCase()
-                    .trim();
+                return text.toString().replace(/\s+/g, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').toUpperCase().trim();
             };
 
             const convertChineseNumerals = (text) => {
@@ -105,30 +68,42 @@
             const fetchSheetData = async () => {
                 setIsDbLoading(true);
                 try {
-                    // 使用 cors-anywhere 或類似機制的概念在這裡不適用，直接抓取
                     const response = await fetch(`${SPREADSHEET_CSV_URL}&t=${Date.now()}`);
-                    if (!response.ok) throw new Error("網路請求失敗，請檢查試算表連結是否正確。");
+                    if (!response.ok) throw new Error("讀取試算表失敗");
                     const csvText = await response.text();
-                    
-                    // 簡易 CSV 解析 (考慮 Android Chrome 換行符號)
                     const rows = csvText.split(/\r?\n/).slice(1);
                     const parsedData = rows.map(row => {
-                        const columns = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                        const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                         return {
-                            number: columns[0]?.replace(/"/g, '').trim() || '',
-                            note: columns[1]?.replace(/"/g, '').trim() || '無備註'
+                            number: cols[0]?.replace(/"/g, '').trim() || '',
+                            note: cols[1]?.replace(/"/g, '').trim() || '',
+                            startDate: cols[2]?.replace(/"/g, '').trim() || '',
+                            endDate: cols[3]?.replace(/"/g, '').trim() || ''
                         };
                     }).filter(item => item.number !== '');
-                    
-                    if (parsedData.length === 0) throw new Error("試算表內查無有效資料。");
-                    
                     setPlates(parsedData);
                     platesRef.current = parsedData;
                 } catch (err) {
-                    setError("載入名單失敗: " + err.message);
+                    setError("資料同步錯誤: " + err.message);
                 } finally {
                     setIsDbLoading(false);
                 }
+            };
+
+            const checkDateValidity = (start, end) => {
+                if (!start && !end) return { valid: true };
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                
+                if (start) {
+                    const sDate = new Date(start);
+                    if (!isNaN(sDate) && now < sDate) return { valid: false, reason: '未到生效期' };
+                }
+                if (end) {
+                    const eDate = new Date(end);
+                    if (!isNaN(eDate) && now > eDate) return { valid: false, reason: '許可已過期' };
+                }
+                return { valid: true };
             };
 
             const performCheck = (val) => {
@@ -136,7 +111,13 @@
                 if (!target) return;
                 setRecognizedPlate(target);
                 const found = platesRef.current.find(p => strictNormalize(p.number) === target);
-                setMatchData(found || null);
+                
+                if (found) {
+                    const dateStatus = checkDateValidity(found.startDate, found.endDate);
+                    setMatchData({ ...found, ...dateStatus });
+                } else {
+                    setMatchData(null);
+                }
             };
 
             useEffect(() => {
@@ -146,137 +127,77 @@
                     recognitionRef.current.continuous = true;
                     recognitionRef.current.interimResults = true;
                     recognitionRef.current.lang = 'zh-HK';
-
-                    recognitionRef.current.onresult = (event) => {
-                        let currentTranscript = '';
-                        for (let i = event.resultIndex; i < event.results.length; ++i) {
-                            currentTranscript += event.results[i][0].transcript;
-                        }
-                        setTranscript(currentTranscript);
-                        lastResultRef.current = currentTranscript;
-                        if (event.results[event.results.length - 1].isFinal || currentTranscript.length > 2) {
-                            performCheck(currentTranscript);
-                        }
+                    recognitionRef.current.onresult = (e) => {
+                        let cur = '';
+                        for (let i = e.resultIndex; i < e.results.length; ++i) cur += e.results[i][0].transcript;
+                        setTranscript(cur);
+                        lastResultRef.current = cur;
+                        if (e.results[e.results.length - 1].isFinal || cur.length > 2) performCheck(cur);
                     };
                     recognitionRef.current.onend = () => setIsListening(false);
-                    recognitionRef.current.onerror = (e) => {
-                        if (e.error === 'not-allowed') {
-                            setError("麥克風權限被拒絕。請在瀏覽器設定中允許此網頁使用麥克風。");
-                        } else if (e.error !== 'aborted') {
-                            setError(`辨識錯誤: ${e.error}`);
-                        }
-                        setIsListening(false);
-                    };
-                } else {
-                    setError("此瀏覽器不支援語音功能，請改用 Chrome 或 Safari。");
+                    recognitionRef.current.onerror = (e) => { if (e.error !== 'aborted') setError(`語音錯誤: ${e.error}`); setIsListening(false); };
                 }
                 fetchSheetData();
             }, []);
 
-            const handlePressStart = (e) => {
+            const handleStart = (e) => {
                 if (e) e.preventDefault();
-                if (!isHttps) return;
-                setError('');
-                setTranscript('');
-                setRecognizedPlate('');
-                setMatchData(null);
-                lastResultRef.current = '';
-                try {
-                    recognitionRef.current.start();
-                    setIsListening(true);
-                    if (navigator.vibrate) navigator.vibrate(50);
-                } catch (err) {
-                    setError("無法啟動錄音: " + err.message);
-                }
+                setError(''); setTranscript(''); setRecognizedPlate(''); setMatchData(null);
+                try { recognitionRef.current.start(); setIsListening(true); if (navigator.vibrate) navigator.vibrate(50); } catch(err){}
             };
 
-            const handlePressEnd = (e) => {
+            const handleEnd = (e) => {
                 if (e) e.preventDefault();
                 if (!isListening) return;
-                setTimeout(() => {
-                    if (recognitionRef.current) recognitionRef.current.stop();
-                    setIsListening(false);
-                    if (lastResultRef.current) performCheck(lastResultRef.current);
-                }, 400);
+                setTimeout(() => { recognitionRef.current.stop(); setIsListening(false); if (lastResultRef.current) performCheck(lastResultRef.current); }, 400);
             };
 
             return (
-                <div className="min-h-screen pb-20 select-none">
-                    <nav className="bg-emerald-600 text-white p-4 shadow-lg sticky top-0 z-50">
+                <div className="min-h-screen pb-20">
+                    <nav className="bg-emerald-700 text-white p-4 shadow-lg sticky top-0 z-50">
                         <div className="max-w-md mx-auto flex justify-between items-center">
                             <div className="flex items-center gap-2">
                                 <Icon name="Volume2" />
-                                <h1 className="text-xl font-bold tracking-tight">車牌語音核對</h1>
+                                <h1 className="text-xl font-bold">車牌語音核對</h1>
                             </div>
-                            <button onClick={fetchSheetData} disabled={isDbLoading} className="p-2 hover:bg-emerald-700 rounded-full transition-all active:scale-90">
-                                <Icon name="RefreshCw" size={20} className={isDbLoading ? "animate-spin" : ""} />
-                            </button>
+                            <button onClick={fetchSheetData} className="p-2 active:scale-90"><Icon name="RefreshCw" className={isDbLoading ? "animate-spin" : ""} /></button>
                         </div>
                     </nav>
 
                     <main className="max-w-md mx-auto p-4 space-y-6">
-                        {error && (
-                            <div className="p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-2xl text-xs font-bold flex items-start gap-3">
-                                <Icon name="AlertCircle" size={18} className="shrink-0" />
-                                <span>{error}</span>
-                            </div>
-                        )}
+                        {error && <div className="p-4 bg-rose-50 text-rose-600 rounded-2xl text-xs font-bold border border-rose-100">{error}</div>}
 
-                        <div className="flex justify-between items-center px-2 text-[10px] text-slate-400 font-mono font-black">
-                            <div className="flex items-center gap-1">
-                                <Icon name="Database" size={12} /> 名單: {isDbLoading ? '同步中...' : `${plates.length} 筆`}
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <div className={`w-2 h-2 rounded-full ${isDbLoading ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></div>
-                                {isDbLoading ? '更新中' : '連線正常'}
-                            </div>
-                        </div>
-
-                        <div className="bg-white rounded-[2.5rem] shadow-xl p-8 flex flex-col items-center text-center border border-slate-100">
-                            <div className="mb-8 relative">
+                        <div className="bg-white rounded-[2.5rem] shadow-xl p-8 flex flex-col items-center text-center">
+                            <div className="mb-6 relative">
                                 {isListening && <div className="absolute -inset-6 border-4 border-emerald-500/20 rounded-full animate-ping"></div>}
-                                <button 
-                                    onMouseDown={handlePressStart} onMouseUp={handlePressEnd}
-                                    onTouchStart={handlePressStart} onTouchEnd={handlePressEnd}
-                                    className={`relative z-10 w-40 h-40 rounded-full flex items-center justify-center transition-all shadow-2xl active:scale-95 touch-none ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-50 text-slate-300 border-4 border-white'}`}
+                                <button onMouseDown={handleStart} onMouseUp={handleEnd} onTouchStart={handleStart} onTouchEnd={handleEnd}
+                                    className={`w-36 h-36 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-50 text-slate-300'}`}
                                 >
-                                    <Icon name={isListening ? "Mic" : "MicOff"} size={64} className={isListening ? "animate-pulse" : ""} />
+                                    <Icon name={isListening ? "Mic" : "MicOff"} size={64} />
                                 </button>
                             </div>
-                            <h2 className={`text-2xl font-black mb-2 ${isListening ? 'text-emerald-600' : 'text-slate-700'}`}>
-                                {isListening ? "正在聆聽..." : "長按說話"}
-                            </h2>
-                            <p className="text-sm text-slate-400 font-medium tracking-tight">對著麥克風說出車牌號碼</p>
-                            
-                            {transcript && (
-                                <div className="mt-8 p-6 bg-slate-50 rounded-3xl w-full border-2 border-slate-100">
-                                    <p className="text-4xl font-mono font-black text-slate-800 tracking-widest break-all">
-                                        {recognizedPlate || '辨識中...'}
-                                    </p>
-                                </div>
-                            )}
+                            <h2 className={`text-2xl font-black ${isListening ? 'text-emerald-600' : 'text-slate-600'}`}>{isListening ? "聆聽中..." : "長按說話"}</h2>
+                            {transcript && <div className="mt-6 p-4 bg-slate-50 rounded-2xl w-full border-2 border-slate-100 font-mono text-3xl font-black">{recognizedPlate || '...'}</div>}
                         </div>
 
-                        {matchData !== null && !isListening && (
-                            <div className="p-6 rounded-[2.5rem] shadow-2xl bg-emerald-600 text-white animate-in">
+                        {matchData && !isListening && (
+                            <div className={`p-6 rounded-[2.5rem] shadow-2xl text-white animate-in ${matchData.valid ? 'bg-emerald-600' : 'bg-amber-500'}`}>
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <p className="text-xs font-black mb-1 opacity-70 tracking-widest uppercase">名單比對結果</p>
-                                        <h2 className="text-5xl font-mono font-black tracking-tighter">{matchData.number}</h2>
+                                        <p className="text-xs font-bold opacity-80 uppercase">{matchData.valid ? '已授權名單' : '警告：效期問題'}</p>
+                                        <h2 className="text-5xl font-mono font-black">{matchData.number}</h2>
                                     </div>
-                                    <div className="bg-white/20 p-4 rounded-3xl backdrop-blur-md border border-white/20"><Icon name="ShieldCheck" size={40} /></div>
+                                    <div className="bg-white/20 p-4 rounded-3xl"><Icon name={matchData.valid ? "ShieldCheck" : "Clock"} size={40} /></div>
                                 </div>
-                                <div className="mt-6 p-5 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-                                    <div className="flex items-start gap-3">
-                                        <Icon name="FileText" size={20} className="mt-1 opacity-70" />
-                                        <div>
-                                            <p className="text-[10px] font-black uppercase mb-1 opacity-50">車位 / 備註資訊</p>
-                                            <p className="text-lg font-bold">{matchData.note || "（無資料）"}</p>
-                                        </div>
+                                <div className="mt-4 p-4 bg-white/10 rounded-2xl border border-white/10 space-y-2">
+                                    <p className="text-sm font-bold">備註：{matchData.note || '無'}</p>
+                                    <div className="flex gap-4 text-[10px] opacity-80 font-mono">
+                                        <span>起：{matchData.startDate || '--'}</span>
+                                        <span>訖：{matchData.endDate || '--'}</span>
                                     </div>
                                 </div>
-                                <div className="mt-6 py-4 bg-white text-emerald-700 rounded-2xl font-black text-xl text-center shadow-inner">
-                                    ✅ 准予進入
+                                <div className="mt-4 py-3 bg-white text-emerald-700 rounded-xl font-black text-center text-xl shadow-lg">
+                                    {matchData.valid ? "✅ 准予進入" : `❌ ${matchData.reason}`}
                                 </div>
                             </div>
                         )}
@@ -284,26 +205,19 @@
                         {matchData === null && recognizedPlate && !isListening && (
                             <div className="p-6 rounded-[2.5rem] shadow-2xl bg-rose-600 text-white animate-in">
                                 <div className="flex justify-between items-center">
-                                    <div>
-                                        <p className="text-xs font-black mb-1 opacity-70 tracking-widest uppercase">系統警告</p>
-                                        <h2 className="text-5xl font-mono font-black tracking-tighter">{recognizedPlate}</h2>
-                                    </div>
-                                    <div className="bg-white/20 p-4 rounded-3xl backdrop-blur-md border border-white/20"><Icon name="ShieldAlert" size={40} /></div>
+                                    <h2 className="text-5xl font-mono font-black">{recognizedPlate}</h2>
+                                    <Icon name="ShieldAlert" size={40} />
                                 </div>
-                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-xl text-center shadow-inner">
-                                    ⚠️ 未在名單內
-                                </div>
+                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-center text-xl uppercase">⚠️ 未在名單內</div>
                             </div>
                         )}
                     </main>
-                    
-                    <footer className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 text-center text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-                        Cloud DB Status: {isDbLoading ? 'Updating' : 'Live Sync'}
+                    <footer className="fixed bottom-0 left-0 right-0 p-4 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                        Database: {plates.length} Records Loaded
                     </footer>
                 </div>
             );
         }
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
