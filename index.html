@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>粵語車牌語音核對系統 (日期精確版)</title>
+    <title>粵語車牌語音核對系統 (星期審核)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -24,7 +24,6 @@
 
         const SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQV-najIami6USTFBzxSpJ7jrxwRGoD4SdNimU4BgHjobS9GwYA-JlNXmVabaWVzBmRezYWrUDqYi4e/pub?output=csv";
 
-        // 強化的圖標組件
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
             useEffect(() => {
@@ -54,6 +53,8 @@
             const platesRef = useRef([]);
             const lastResultRef = useRef('');
 
+            const weekdayNames = ["日", "一", "二", "三", "四", "五", "六"];
+
             const strictNormalize = (text) => {
                 if (!text) return '';
                 return text.toString().replace(/\s+/g, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '').toUpperCase().trim();
@@ -68,7 +69,7 @@
                 setIsDbLoading(true);
                 try {
                     const response = await fetch(`${SPREADSHEET_CSV_URL}&t=${Date.now()}`);
-                    if (!response.ok) throw new Error("讀取記錄失敗");
+                    if (!response.ok) throw new Error("讀取試算表失敗");
                     const csvText = await response.text();
                     const rows = csvText.split(/\r?\n/).slice(1);
                     const parsedData = rows.map(row => {
@@ -77,7 +78,8 @@
                             number: cols[0]?.replace(/"/g, '').trim() || '',
                             note: cols[1]?.replace(/"/g, '').trim() || '',
                             startDate: cols[2]?.replace(/"/g, '').trim() || '',
-                            endDate: cols[3]?.replace(/"/g, '').trim() || ''
+                            endDate: cols[3]?.replace(/"/g, '').trim() || '',
+                            allowedDays: cols[4]?.replace(/"/g, '').trim() || '' // 新增：允許星期
                         };
                     }).filter(item => item.number !== '');
                     setPlates(parsedData);
@@ -89,32 +91,43 @@
                 }
             };
 
-            const checkDateValidity = (start, end) => {
-                if (!start && !end) return { valid: true };
-                
-                // 獲取當前日期並抹除時間（設為 00:00:00）
+            const checkValidity = (data) => {
                 const now = new Date();
                 now.setHours(0, 0, 0, 0);
                 const nowTs = now.getTime();
-                
-                if (start) {
-                    const sDate = new Date(start);
+                const todayDay = new Date().getDay(); // 0 (日) 到 6 (六)
+
+                // 1. 檢查日期範圍
+                if (data.startDate) {
+                    const sDate = new Date(data.startDate);
                     sDate.setHours(0, 0, 0, 0);
-                    // 如果現在時間小於開始日期
-                    if (!isNaN(sDate.getTime()) && nowTs < sDate.getTime()) {
-                        return { valid: false, reason: '未到生效期' };
-                    }
+                    if (!isNaN(sDate.getTime()) && nowTs < sDate.getTime()) return { valid: false, reason: '未到生效期' };
                 }
-                
-                if (end) {
-                    const eDate = new Date(end);
+                if (data.endDate) {
+                    const eDate = new Date(data.endDate);
                     eDate.setHours(0, 0, 0, 0);
-                    // 如果現在時間大於結束日期
-                    if (!isNaN(eDate.getTime()) && nowTs > eDate.getTime()) {
-                        return { valid: false, reason: '泊車許可已過期' };
+                    if (!isNaN(eDate.getTime()) && nowTs > eDate.getTime()) return { valid: false, reason: '許可已過期' };
+                }
+
+                // 2. 檢查星期幾 (如果欄位不為空)
+                if (data.allowedDays) {
+                    // 支援格式如 "1,2,3" 或 "123" 或 "一,二"
+                    const daysStr = data.allowedDays.toString();
+                    const currentDayStr = todayDay.toString();
+                    
+                    // 建立一個檢查函數，支援數字和中文字
+                    const checkDay = (str) => {
+                        const dayMap = {"日":0, "一":1, "二":2, "三":3, "四":4, "五":5, "六":6};
+                        if (str.includes(currentDayStr)) return true;
+                        if (str.includes(weekdayNames[todayDay])) return true;
+                        return false;
+                    };
+
+                    if (!checkDay(daysStr)) {
+                        return { valid: false, reason: `今日(週${weekdayNames[todayDay]})非允許泊車日` };
                     }
                 }
-                
+
                 return { valid: true };
             };
 
@@ -125,8 +138,8 @@
                 const found = platesRef.current.find(p => strictNormalize(p.number) === target);
                 
                 if (found) {
-                    const dateStatus = checkDateValidity(found.startDate, found.endDate);
-                    setMatchData({ ...found, ...dateStatus });
+                    const status = checkValidity(found);
+                    setMatchData({ ...found, ...status });
                 } else {
                     setMatchData(null);
                 }
@@ -170,11 +183,11 @@
 
             return (
                 <div className="min-h-screen pb-20">
-                    <nav className="bg-emerald-800 text-white p-4 shadow-lg sticky top-0 z-50">
+                    <nav className="bg-slate-800 text-white p-4 shadow-lg sticky top-0 z-50">
                         <div className="max-w-md mx-auto flex justify-between items-center">
                             <div className="flex items-center gap-2">
-                                <Icon name="Volume2" />
-                                <h1 className="text-xl font-bold tracking-tight">車牌語音核對</h1>
+                                <Icon name="ShieldCheck" className="text-emerald-400" />
+                                <h1 className="text-xl font-bold tracking-tight">車牌權限核對</h1>
                             </div>
                             <button onClick={fetchSheetData} className="p-2 active:scale-90 bg-white/10 rounded-full">
                                 <Icon name="RefreshCw" className={isDbLoading ? "animate-spin" : ""} />
@@ -183,21 +196,16 @@
                     </nav>
 
                     <main className="max-w-md mx-auto p-4 space-y-6">
-                        {error && <div className="p-4 bg-rose-50 text-rose-600 rounded-2xl text-xs font-bold border border-rose-100 flex items-center gap-2">
-                            <Icon name="AlertCircle" size={14} /> {error}
-                        </div>}
-
                         <div className="bg-white rounded-[2.5rem] shadow-xl p-8 flex flex-col items-center text-center border border-slate-100">
                             <div className="mb-6 relative">
                                 {isListening && <div className="absolute -inset-6 border-4 border-emerald-500/20 rounded-full animate-ping"></div>}
                                 <button onMouseDown={handleStart} onMouseUp={handleEnd} onTouchStart={handleStart} onTouchEnd={handleEnd}
-                                    className={`w-36 h-36 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 touch-none ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-50 text-slate-300'}`}
+                                    className={`w-36 h-36 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 touch-none ${isListening ? 'bg-emerald-500 text-white ring-8 ring-emerald-50' : 'bg-slate-100 text-slate-400'}`}
                                 >
                                     <Icon name={isListening ? "Mic" : "MicOff"} size={64} />
                                 </button>
                             </div>
                             <h2 className={`text-2xl font-black ${isListening ? 'text-emerald-600' : 'text-slate-600'}`}>{isListening ? "聆聽中..." : "長按說話"}</h2>
-                            <p className="text-xs text-slate-400 mt-1">支持廣東話識別</p>
                             
                             {transcript && (
                                 <div className="mt-8 p-6 bg-slate-50 rounded-3xl w-full border-2 border-slate-100 font-mono text-4xl font-black text-slate-800">
@@ -210,22 +218,31 @@
                             <div className={`p-6 rounded-[2.5rem] shadow-2xl text-white animate-in ${matchData.valid ? 'bg-emerald-600' : 'bg-amber-500'}`}>
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">{matchData.valid ? '已授權名單' : '狀態：不適用'}</p>
-                                        <h2 className="text-5xl font-mono font-black">{matchData.number}</h2>
+                                        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">{matchData.valid ? '身分確認：准予進入' : '警告：無效進入'}</p>
+                                        <h2 className="text-5xl font-mono font-black tracking-tighter">{matchData.number}</h2>
                                     </div>
-                                    <div className="bg-white/20 p-4 rounded-3xl"><Icon name={matchData.valid ? "ShieldCheck" : "Clock"} size={40} /></div>
+                                    <div className="bg-white/20 p-4 rounded-3xl"><Icon name={matchData.valid ? "CheckCircle" : "AlertTriangle"} size={40} /></div>
                                 </div>
+                                
                                 <div className="mt-4 p-5 bg-white/10 rounded-2xl border border-white/10 space-y-3">
                                     <div className="flex items-center gap-2 text-sm font-bold">
-                                        <Icon name="FileText" size={16} /> 備註：{matchData.note || '無'}
+                                        <Icon name="Info" size={16} /> 備註：{matchData.note || '無'}
                                     </div>
-                                    <div className="flex gap-4 text-[11px] opacity-90 font-mono bg-black/10 p-2 rounded-lg">
-                                        <span>生效：{matchData.startDate || '不限'}</span>
-                                        <span>過期：{matchData.endDate || '不限'}</span>
+                                    <div className="grid grid-cols-2 gap-2 text-[11px] opacity-90 font-mono bg-black/10 p-2 rounded-lg">
+                                        <div>生效：{matchData.startDate || '不限'}</div>
+                                        <div>過期：{matchData.endDate || '不限'}</div>
+                                        <div className="col-span-2 border-t border-white/10 pt-1">
+                                            允許星期：{matchData.allowedDays || '每天'}
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="mt-6 py-4 bg-white text-emerald-700 rounded-2xl font-black text-center text-2xl shadow-lg border-b-4 border-emerald-100">
-                                    {matchData.valid ? "✅ 准予進入" : `❌ ${matchData.reason}`}
+
+                                <div className="mt-6 py-4 bg-white text-slate-800 rounded-2xl font-black text-center text-2xl shadow-lg border-b-4 border-slate-200">
+                                    {matchData.valid ? (
+                                        <span className="text-emerald-600 flex items-center justify-center gap-2">✅ 准予進入</span>
+                                    ) : (
+                                        <span className="text-amber-600 flex items-center justify-center gap-2">❌ {matchData.reason}</span>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -233,20 +250,18 @@
                         {matchData === null && recognizedPlate && !isListening && (
                             <div className="p-6 rounded-[2.5rem] shadow-2xl bg-rose-600 text-white animate-in">
                                 <div className="flex justify-between items-center">
-                                    <div>
-                                        <p className="text-xs font-bold opacity-80 uppercase tracking-widest">系統核對</p>
-                                        <h2 className="text-5xl font-mono font-black">{recognizedPlate}</h2>
-                                    </div>
-                                    <Icon name="ShieldAlert" size={40} />
+                                    <h2 className="text-5xl font-mono font-black">{recognizedPlate}</h2>
+                                    <Icon name="XCircle" size={40} />
                                 </div>
-                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-center text-2xl uppercase border-b-4 border-rose-100">
-                                    ⚠️ 未在名單內
+                                <div className="mt-6 py-4 bg-white text-rose-600 rounded-2xl font-black text-center text-2xl border-b-4 border-rose-100 uppercase">
+                                    ⚠️ 黑名單 / 未登記
                                 </div>
                             </div>
                         )}
                     </main>
-                    <footer className="fixed bottom-0 left-0 right-0 p-4 bg-slate-50/80 backdrop-blur-md text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                        Database: {plates.length} Records Loaded
+                    
+                    <footer className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest border-t">
+                        今日：週{weekdayNames[new Date().getDay()]} | 資料庫: {plates.length} 筆
                     </footer>
                 </div>
             );
@@ -256,4 +271,3 @@
     </script>
 </body>
 </html>
-
