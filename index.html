@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>粵語車牌語音核對系統 (簡化資訊版)</title>
+    <title>粵語車牌語音核對系統 (每日獨立時段版)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -41,7 +41,6 @@
                 search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
                 activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             };
-
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                     {icons[name.toLowerCase()] || null}
@@ -84,7 +83,16 @@
                             note: cols[1]?.replace(/"/g, '').trim() || '',
                             startDate: cols[2]?.replace(/"/g, '').trim() || '',
                             endDate: cols[3]?.replace(/"/g, '').trim() || '',
-                            allowedDays: cols[4]?.replace(/"/g, '').trim() || ''
+                            // E-K 欄位 (索引 4-10) 對應 週日-週六 的時段
+                            dailySlots: [
+                                cols[4]?.replace(/"/g, '').trim() || '', // 週日
+                                cols[5]?.replace(/"/g, '').trim() || '', // 週一
+                                cols[6]?.replace(/"/g, '').trim() || '', // 週二
+                                cols[7]?.replace(/"/g, '').trim() || '', // 週三
+                                cols[8]?.replace(/"/g, '').trim() || '', // 週四
+                                cols[9]?.replace(/"/g, '').trim() || '', // 週五
+                                cols[10]?.replace(/"/g, '').trim() || '' // 週六
+                            ]
                         };
                     }).filter(item => item.number !== '');
                     setPlates(parsedData);
@@ -98,31 +106,60 @@
 
             const checkValidity = (data) => {
                 const now = new Date();
-                now.setHours(0, 0, 0, 0);
-                const todayDay = now.getDay();
+                const todayDay = now.getDay(); // 0 (日) 到 6 (六)
+                const currentTimeStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
 
-                if (data.startDate && now < new Date(data.startDate)) return { valid: false, reason: '未到生效期' };
-                if (data.endDate && now > new Date(data.endDate)) return { valid: false, reason: '許可已過期' };
+                // 1. 日期有效期檢查
+                const dateOnlyNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                if (data.startDate && dateOnlyNow < new Date(data.startDate)) return { valid: false, reason: '未到生效期' };
+                if (data.endDate && dateOnlyNow > new Date(data.endDate)) return { valid: false, reason: '許可已過期' };
                 
-                if (data.allowedDays) {
-                    const daysStr = data.allowedDays.toString();
-                    if (!daysStr.includes(todayDay.toString()) && !daysStr.includes(weekdayNames[todayDay])) {
-                        return { valid: false, reason: `今日(週${weekdayNames[todayDay]})非允許泊車日` };
+                // 2. 獲取當天對應的時段
+                const todaySlot = data.dailySlots[todayDay];
+
+                // 3. 檢查當天是否允許 (時段欄位是否為空)
+                if (!todaySlot) {
+                    return { valid: false, reason: `今日(週${weekdayNames[todayDay]})不准許進入` };
+                }
+
+                // 4. 時段比對 (支援格式: 08:00-18:00)
+                if (todaySlot.includes('-')) {
+                    const [start, end] = todaySlot.split('-').map(t => t.trim());
+                    if (currentTimeStr < start || currentTimeStr > end) {
+                        return { valid: false, reason: `今日准許時段為 ${todaySlot} (目前：${currentTimeStr})` };
                     }
                 }
-                return { valid: true };
+
+                return { valid: true, currentSlot: todaySlot };
             };
 
             const performCheck = (val) => {
                 const target = strictNormalize(convertChineseNumerals(val));
                 if (!target) return;
-                const found = platesRef.current.find(p => strictNormalize(p.number) === target);
-                if (found) {
-                    const status = checkValidity(found);
-                    setMatchData({ ...found, ...status });
-                } else {
+
+                const matchedRecords = platesRef.current.filter(p => strictNormalize(p.number) === target);
+
+                if (matchedRecords.length === 0) {
                     setMatchData({ number: target, isUnknown: true });
+                    return;
                 }
+
+                let finalResult = null;
+                for (const record of matchedRecords) {
+                    const status = checkValidity(record);
+                    if (status.valid) {
+                        finalResult = { ...record, ...status };
+                        break; 
+                    }
+                }
+
+                if (!finalResult) {
+                    // 如果都失敗，回報第一筆失敗的原因
+                    const status = checkValidity(matchedRecords[0]);
+                    finalResult = { ...matchedRecords[0], ...status };
+                }
+
+                setMatchData(finalResult);
             };
 
             useEffect(() => {
@@ -165,7 +202,7 @@
                         <div className="max-w-md mx-auto flex justify-between items-center">
                             <div className="flex items-center gap-2">
                                 <LucideSVG name="shieldcheck" className="text-emerald-400" />
-                                <h1 className="text-lg font-bold">車牌權限核對系統</h1>
+                                <h1 className="text-lg font-bold">每日獨立時段核對系統</h1>
                             </div>
                             <button onClick={fetchSheetData} className="p-2 active:scale-90 bg-white/10 rounded-full transition-all">
                                 <LucideSVG name="refreshcw" className={isDbLoading ? "animate-spin" : ""} />
@@ -179,7 +216,7 @@
                                 <div className={`p-6 rounded-[2.5rem] shadow-2xl text-white animate-in ${matchData.isUnknown ? 'bg-rose-600' : (matchData.valid ? 'bg-emerald-600' : 'bg-amber-500')}`}>
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <p className="text-[20px] font-bold opacity-80 uppercase tracking-widest mb-1">
+                                            <p className="text-[15px] font-bold opacity-80 uppercase tracking-widest mb-1">
                                                 {matchData.isUnknown ? '核對結果：查無紀錄' : (matchData.valid ? '身分確認：准予進入' : '警告：限制進入')}
                                             </p>
                                             <h2 className="text-5xl font-mono font-black tracking-tighter">{matchData.number}</h2>
@@ -190,28 +227,28 @@
                                     </div>
                                     
                                     {!matchData.isUnknown && (
-                                        <div className="mt-4 space-y-2 bg-white/10 p-4 rounded-2xl border border-white/10">
+                                        <div className="mt-4 space-y-2 bg-white/10 p-4 rounded-2xl border border-white/10 text-sm">
                                             <div className="flex items-start gap-2">
                                                 <LucideSVG name="filetext" size={16} className="mt-0.5 opacity-80" />
-                                                <div className="text-sm">
-                                                    <span className="font-bold block text-[10px] opacity-70 uppercase">備註資訊</span>
+                                                <div>
+                                                    <span className="font-bold block text-[15px] opacity-70 uppercase">備註</span>
                                                     {matchData.note || '無備註'}
                                                 </div>
                                             </div>
                                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
                                                 <div>
-                                                    <span className="font-bold block text-[10px] opacity-70 uppercase">生效日期</span>
-                                                    <span className="text-xs font-mono">{matchData.startDate || '不限'}</span>
+                                                    <span className="font-bold block text-[15px] opacity-70 uppercase">今日准許時段</span>
+                                                    <span className="text-xs font-mono font-bold">{matchData.currentSlot || '不准許'}</span>
                                                 </div>
                                                 <div>
-                                                    <span className="font-bold block text-[10px] opacity-70 uppercase">到期日期</span>
+                                                    <span className="font-bold block text-[15px] opacity-70 uppercase">有效至</span>
                                                     <span className="text-xs font-mono">{matchData.endDate || '不限'}</span>
                                                 </div>
                                             </div>
                                         </div>
                                     )}
 
-                                    <div className="mt-6 py-4 bg-white text-slate-800 rounded-2xl font-black text-center text-2xl shadow-inner">
+                                    <div className="mt-6 py-4 bg-white text-slate-800 rounded-2xl font-black text-center text-xl shadow-inner px-2 leading-tight">
                                         {matchData.isUnknown ? "⚠️ 未在名單內" : (matchData.valid ? "✅ 准予通行" : `❌ ${matchData.reason}`)}
                                     </div>
                                 </div>
@@ -262,7 +299,7 @@
                             
                             <div className="mt-8 text-center space-y-1">
                                 <p className={`text-lg font-black transition-colors ${isListening ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                    {isListening ? "請讀出車牌號碼" : "長按進行語音辨識"}
+                                    {isListening ? "請讀出車牌號碼" : "長按咪高風辨識"}
                                 </p>
                             </div>
                         </div>
@@ -270,7 +307,9 @@
                     
                     <footer className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md text-center text-[10px] text-slate-400 font-bold border-t">
                         <div className="max-w-md mx-auto flex justify-between items-center opacity-70 px-2">
-                            <span>今日：週{weekdayNames[new Date().getDay()]}</span>
+                            <div className="flex flex-col items-start">
+                                <span>系統時間：週{weekdayNames[new Date().getDay()]} {new Date().getHours().toString().padStart(2, '0')}:{new Date().getMinutes().toString().padStart(2, '0')}</span>
+                            </div>
                             <span className="bg-slate-200 text-slate-600 px-3 py-1 rounded-full">{plates.length} 筆資料</span>
                         </div>
                     </footer>
@@ -282,6 +321,3 @@
     </script>
 </body>
 </html>
-
-
-
